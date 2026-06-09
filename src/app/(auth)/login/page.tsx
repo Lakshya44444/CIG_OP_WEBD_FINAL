@@ -124,9 +124,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="mt-4 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-500 text-center">
-          <span className="font-medium">Demo:</span> admin@snapvault.com / password123
-        </div>
       </div>
     </div>
   );
