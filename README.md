@@ -1,51 +1,136 @@
-# Pixora — Event & Media Management Platform
+# Pixora : Event & Media Management Platform
 
-A full-stack platform for managing event photography and videography. Built for college clubs and organizations to handle media uploads, face-based photo discovery, real-time notifications, and role-based access control.
+A full-stack platform for college clubs and organizations to manage event photography and videography. Covers the full lifecycle: create an event, upload media, organize into albums, discover photos using AI face search, and share with role-based visibility controls.
+
+**Live Demo:** [https://cig-op-webd-final.vercel.app](https://cig-op-webd-final.vercel.app)  
+**Database Schema:** [https://dbdiagram.io/d/6a26cbf025fc5bf036b9f762](https://dbdiagram.io/d/6a26cbf025fc5bf036b9f762)
 
 ---
 
 ## Table of Contents
-
+- [Demo Accounts](#demo-accounts)
 - [Features](#features)
+- [How It Works](#how-it-works)
+- [Role Guide](#role-guide)
 - [Tech Stack](#tech-stack)
-- [Roles & Permissions](#roles--permissions)
 - [Project Structure](#project-structure)
 - [Database Schema](#database-schema)
 - [Environment Variables](#environment-variables)
 - [Local Setup](#local-setup)
-- [Deployment (Vercel Free Tier)](#deployment-vercel-free-tier)
+- [Deployment](#deployment)
 - [API Routes](#api-routes)
-- [Architecture](#architecture)
+
+---
+
+## Demo Accounts
+
+All accounts use password: **`password123`**
+
+| Role | Email | Name |
+|---|---|---|
+| ADMIN (Superadmin) | admin@snapvault.com | Admin User |
+| PHOTOGRAPHER | photographer@snapvault.com | Alex Photographer |
+| VIEWER (Event Member) | member@snapvault.com | Jane Member |
+| VIEWER (No membership) | viewer@snapvault.com | View Only |
 
 ---
 
 ## Features
 
-### Core
-- **Event management** — Create public/private events with categories, cover images, and locations
-- **Media upload** — Drag-and-drop photos and videos; duplicate detection before uploading
-- **Role-based visibility** — Photographer uploads are visible to all; member uploads are member-only
-- **AI auto-tagging** — Optional Cloudinary-powered tags on upload (off by default on free tier)
-- **Face search** — Upload a selfie, find all photos you appear in using pixel-level NCC comparison
-- **Albums** — Organize event media into named albums
-- **Watermarked downloads** — Track and optionally watermark downloaded media
+**Authentication** — Email + password with 6-digit OTP verification (10-min expiry), OTP resend, forgot-password via secure JWT reset link (1-hour expiry), 30-day JWT sessions.
 
-### Social
-- Like, comment, and favorite any photo or video
-- Tag other users in media
-- Follow / unfollow other users
-- Real-time notifications (Pusher WebSocket) for likes, comments, tags, follows
+**Events** — Create events with name, description, date, location, cover image, and one of 8 categories (Photoshoot, Workshop, Trip, Competition, Cultural, Party, Sports, Other). Public/private toggle. Filter by category, sort by date or name, text search.
 
-### Auth
-- Email/password registration with OTP email verification (Gmail SMTP)
-- JWT sessions via NextAuth.js v5
-- Profile page with avatar, bio, and reference selfie for face search
+**Media Upload** — Drag-and-drop multi-file upload for photos (JPEG, PNG, WebP) and videos (MP4, WebM, MOV) up to 50 MB each. Duplicate detection checks file size within the event before uploading. Files stored on Cloudinary CDN at full quality; 800px thumbnails auto-generated for fast grid loading.
 
-### Admin
-- ADMIN and CLUB_ADMIN dashboards
-- Per-event admin assignment (`EventAdmin` table)
-- Per-event member management (`EventMember` table)
-- Manage users, promote roles
+**Albums** — Organize event media into named albums. QR code generation for direct album sharing links.
+
+**AI Auto-Tagging** — Cloudinary Vision API analyzes each photo for faces (`portrait`, `group`, `crowd`, `selfie`), colors (`indoor`/`outdoor`, `daylight`/`night`, `warm`/`cool`), and aspect ratio (`landscape`, `vertical`). Toggle per upload or bulk-tag from the AI panel. Tags are clickable and link to search results.
+
+**Face Search** — Upload a selfie as your reference image. Platform crops your face to a 24×24 greyscale pixel fingerprint and runs Normalized Cross-Correlation (NCC) against face crops from recent event photos. Photos scoring above 0.25 similarity are returned as matches. Confidence scores (0–1) stored per match. Respects role-based visibility — you only search photos you can access. Capped at 12 photos per search to fit within Vercel's 10s function timeout.
+
+**Search** — Global search across photos, events, and users. Filter by date range. Click any AI tag to find similar photos. Popular tag chips for quick discovery. Tabbed results (All / Photos / Events / People), debounced at 300ms.
+
+**Social** — Like (toggle with real-time notification), comment (threaded), favorite/bookmark, tag friends in photos (sends TAG notification), follow/unfollow users.
+
+**Downloads** — One-click download with automatic watermarking (event name + user role, 60% opacity, bottom-right). ADMIN and PHOTOGRAPHER roles download without watermark. Every download is logged with watermark status for analytics.
+
+**Real-Time Notifications** — Pusher WebSocket delivers instant notifications for likes, comments, tags, follows, and system messages. Bell icon with unread badge. Mark individual or all as read.
+
+**Dashboard** — Platform stats (events, media, uploads, likes), role-aware latest photos, recent events, quick action buttons.
+
+**Admin Dashboard** — 10+ metrics (users, media, events, likes, comments, downloads, storage MB, AI-tagged count, face matches, videos, total engagement), inline role management, top 5 most-liked photos.
+
+**Profile** — Avatar with camera badge if a face selfie is saved, role badge, upload/like/favorite/download stats, tabbed media views (Uploads / Liked / Favorites), settings page for name, email, password, avatar, bio.
+
+---
+
+## How It Works
+
+### Member-Only Visibility
+
+Every media item has a `memberOnly` boolean:
+
+| Who uploads | `memberOnly` | Who can see |
+|---|---|---|
+| ADMIN / CLUB_ADMIN / PHOTOGRAPHER | `false` | Everyone with event access |
+| VIEWER with EventMember | `true` | Only EventMembers + admins of that event |
+
+Attendees can privately share phone photos within the group without exposing them publicly.
+
+### Upload Permissions
+
+| Role | Public event | Private event |
+|---|---|---|
+| ADMIN / CLUB_ADMIN | Can upload | Can upload |
+| PHOTOGRAPHER | Can upload | Can upload if EventMember |
+| VIEWER | Cannot upload | Can upload if EventMember |
+
+### Watermark Logic
+
+Watermarks are applied at download time via Cloudinary's transformation API — no separate file is stored. The overlay text includes the event name and the downloader's role (e.g. `Annual Fest · VIEWER`), positioned bottom-right at 60% opacity with a drop shadow. ADMIN and PHOTOGRAPHER roles receive a clean copy. Every download — watermarked or not — is recorded in the `downloads` table with the `watermarked` boolean for usage analytics.
+
+### Face Search Algorithm
+
+Standard face recognition (FaceNet, DeepFace) requires GPU inference — incompatible with Vercel's 10-second function timeout. Pixora uses a lightweight pixel-level approach instead:
+
+1. User saves a selfie → Cloudinary crops primary face → resized to 24×24 greyscale
+2. For each candidate photo → Cloudinary returns face bounding boxes
+3. Each face crop resized to 24×24 greyscale using `sharp`
+4. NCC score = normalized dot product of pixel vectors (zero-mean, unit-variance)
+5. Score ≥ 0.25 → match saved to `face_matches` table with confidence score
+6. Stale matches below threshold are deleted on each run
+7. Results ranked by confidence, filtered by user's visibility permissions
+
+NCC is lighting-invariant because it normalizes by mean and variance. It works reliably for club event photos where faces are front-facing and lighting is consistent.
+
+---
+
+## Role Guide
+
+**ADMIN** — Full platform access. Manages all users, events, media. Accesses `/admin` dashboard. Promotes/demotes roles. Downloads without watermark.
+
+**CLUB_ADMIN** — Creates and manages their own events. Adds EventAdmins and EventMembers. Cannot access global admin or other clubs' events.
+
+**PHOTOGRAPHER** — Uploads to any public event, or private events they are an EventMember of. Uploads are always public (`memberOnly = false`). Downloads without watermark. Cannot create events.
+
+**VIEWER** — Default role for all new users. Browses public events and media. Can upload only as an EventMember — those uploads are `memberOnly = true`, visible only to admins and fellow members of that event.
+
+### Permission Matrix
+
+| Action | ADMIN | CLUB_ADMIN | PHOTOGRAPHER | VIEWER |
+|---|---|---|---|---|
+| Access `/admin` dashboard | Yes | No | No | No |
+| Create events | Yes | Yes | No | No |
+| Manage event members | Yes | Own events | No | No |
+| Upload to public events | Yes | Yes | Yes | No |
+| Upload as EventMember | Yes | Yes | Yes | Yes |
+| View memberOnly media | Yes | Own events | No | If EventMember |
+| Download without watermark | Yes | No | Yes | No |
+| Promote user roles | Yes | No | No | No |
+| Like / comment / favorite | Yes | Yes | Yes | Yes |
+| Follow users | Yes | Yes | Yes | Yes |
+| Run face search | Yes | Yes | Yes | Yes |
 
 ---
 
@@ -55,50 +140,18 @@ A full-stack platform for managing event photography and videography. Built for 
 |---|---|
 | Framework | Next.js 14 (App Router, Server Components) |
 | Language | TypeScript |
-| Styling | Tailwind CSS |
+| Styling | Tailwind CSS v4 |
 | ORM | Prisma v5 |
 | Database | PostgreSQL via Supabase (free tier) |
 | Auth | NextAuth.js v5 (JWT, credentials provider) |
-| Media storage | Cloudinary (free tier, 25 GB) |
-| Real-time | Pusher Channels (free tier, 100 simultaneous) |
-| Email | Gmail SMTP (App Password) |
-| Image processing | sharp (bundled with Next.js) |
+| Media storage | Cloudinary (CDN, watermarking, face detection, AI tagging) |
+| Real-time | Pusher Channels (WebSocket, free tier) |
+| Email | Gmail SMTP via Nodemailer |
+| Image processing | sharp (NCC face fingerprint comparison) |
+| Animations | Framer Motion |
+| State / data | Zustand, SWR, React Query |
+| Validation | Zod |
 | Deployment | Vercel (free tier) |
-
----
-
-## Roles & Permissions
-
-### Global Roles
-
-| Role | Description |
-|---|---|
-| `ADMIN` | Platform superadmin — full access everywhere |
-| `CLUB_ADMIN` | Can create events, manage event membership for their events |
-| `PHOTOGRAPHER` | Can upload to public events and private events they are EventMember of |
-| `VIEWER` | Default role — can browse public events; uploads only as EventMember |
-
-### Per-Event Tables
-
-- **`EventAdmin`** — marks a user as admin for a specific event (granted by ADMIN/CLUB_ADMIN)
-- **`EventMember`** — grants private event access + upload permission to any user
-
-### Media Visibility Matrix
-
-| Upload by | `memberOnly` field | Who can see |
-|---|---|---|
-| ADMIN / CLUB_ADMIN | `false` | Everyone with event access |
-| PHOTOGRAPHER | `false` | Everyone with event access |
-| EventMember (VIEWER) | `true` | Only admins + EventMembers |
-
-### Event Access
-
-| User | Public event | Private event |
-|---|---|---|
-| ADMIN / CLUB_ADMIN | Full access | Full access |
-| PHOTOGRAPHER | Can view + upload | Can view + upload if EventMember |
-| VIEWER | Can view | Only if EventMember |
-| Unauthenticated | Can view | Redirected |
 
 ---
 
@@ -107,166 +160,138 @@ A full-stack platform for managing event photography and videography. Built for 
 ```
 src/
 ├── app/
-│   ├── (auth)/          # Login, register, verify-email pages
-│   ├── (main)/          # Authenticated layout
-│   │   ├── dashboard/   # Role-aware media dashboard
-│   │   ├── events/      # Event list + detail pages
-│   │   ├── upload/      # Drag-and-drop upload page
-│   │   ├── ai/          # Face search page
-│   │   ├── profile/     # User profile + selfie management
-│   │   └── admin/       # Admin panels
-│   └── api/
-│       ├── auth/        # NextAuth.js handler
-│       ├── events/      # CRUD for events, members, admins
-│       ├── media/       # Upload, list, download, duplicate-check
-│       ├── ai/          # Face search endpoint
-│       ├── users/       # User management
-│       └── notifications/ # Read/mark notifications
+│   ├── (auth)/          # login, register, verify-email, forgot-password, reset-password
+│   ├── (main)/
+│   │   ├── dashboard/   # stats, recent photos, quick actions
+│   │   ├── events/      # list, detail, edit
+│   │   ├── upload/      # drag-and-drop upload
+│   │   ├── ai/          # AI tagging + face search
+│   │   ├── search/      # global search with tag + date filters
+│   │   ├── profile/     # user profile + settings
+│   │   ├── media/       # media viewer, comments, social
+│   │   ├── notifications/
+│   │   └── admin/       # ADMIN-only dashboard
+│   └── api/             # all REST endpoints (see API Routes)
 ├── components/
-│   ├── ui/              # Shared UI primitives (Button, Card, etc.)
-│   ├── media/           # MediaCard, MediaGrid, LightboxModal
-│   ├── events/          # EventCard, EventForm
-│   └── notifications/   # NotificationBell (real-time Pusher)
+│   ├── ui/              # Button, Input, Card, Badge, Dialog, Tabs, Select …
+│   ├── media/           # MediaGrid, MediaActions, CommentSection, TagFriend
+│   ├── events/          # EventCard, EventFilters, EventMemberManager, QRCodeShare
+│   ├── notifications/   # NotificationBell (live Pusher)
+│   └── admin/           # UserRoleManager
 ├── lib/
 │   ├── auth.ts          # NextAuth config
 │   ├── db.ts            # Prisma singleton
-│   ├── cloudinary.ts    # Upload, thumbnail, face crop helpers
-│   ├── pusher.ts        # Pusher server + channel helpers
-│   ├── ai.ts            # AI tag generation
-│   └── utils.ts         # cn(), formatBytes, constants
-├── types/               # Shared TypeScript types
-└── proxy.ts             # Pusher auth proxy
+│   ├── cloudinary.ts    # upload, thumbnail, watermark, face crop
+│   ├── pusher.ts        # server-side event triggers
+│   ├── email.ts         # OTP + password reset templates
+│   ├── ai.ts            # Cloudinary Vision tag generation
+│   ├── validations.ts   # Zod schemas
+│   └── utils.ts         # cn(), formatBytes, formatDate, constants
+├── types/
+└── middleware.ts         # auth guard + route protection
 
 prisma/
-├── schema.prisma        # Database models
-└── seed.ts              # Optional seed data
-
-schema.dbml              # DB schema for dbdiagram.io
-ARCHITECTURE.md          # System + ER diagrams (Mermaid)
+├── schema.prisma         # 14 models + enums
+└── seed.ts               # 4 demo accounts + 2 sample events
 ```
 
 ---
 
 ## Database Schema
 
-14 tables. Full DBML source: [schema.dbml](schema.dbml)
-ER and system diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
-Visualize interactively at [dbdiagram.io](https://dbdiagram.io) — paste `schema.dbml`.
-
-Key tables:
+14 tables. Full DBML: [schema.dbml](schema.dbml) | Interactive: [dbdiagram.io](https://dbdiagram.io/d/6a26cbf025fc5bf036b9f762)
 
 | Table | Purpose |
 |---|---|
-| `users` | Accounts, roles, selfie URL, OTP fields |
-| `events` | Event metadata, public/private flag |
-| `event_admins` | Per-event admin assignments |
-| `event_members` | Per-event membership grants |
-| `media` | Photos and videos with `memberOnly` flag |
-| `albums` | Media grouping within an event |
-| `likes / comments / favorites / media_tags` | Social interactions |
-| `notifications` | Real-time notification records |
-| `face_matches` | AI face search results (NCC score) |
+| `users` | Accounts, roles, OTP fields, reference selfie URL |
 | `follows` | User follow graph |
-| `downloads` | Download audit log |
+| `events` | Metadata, category, public/private flag |
+| `event_admins` | Per-event admin assignments |
+| `event_members` | Per-event membership (gates upload + visibility) |
+| `albums` | Media grouping within events |
+| `media` | Photos/videos — URL, publicId, `memberOnly`, `aiTags[]` |
+| `likes` / `comments` / `favorites` / `media_tags` | Social interactions |
+| `notifications` | All notification types with sender and link |
+| `face_matches` | NCC confidence scores per (user, media) pair |
+| `downloads` | Audit log with watermark status |
+
+**Enums:** `Role` (ADMIN · CLUB_ADMIN · PHOTOGRAPHER · VIEWER) · `MediaType` (IMAGE · VIDEO) · `NotificationType` (LIKE · COMMENT · TAG · SHARE · FOLLOW · SYSTEM) · `EventCategory` (PHOTOSHOOT · WORKSHOP · TRIP · COMPETITION · CULTURAL · PARTY · SPORTS · OTHER)
 
 ---
 
 ## Environment Variables
 
-Create `.env` in the project root:
-
 ```env
-# Database (Supabase)
-DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres"
-
-# NextAuth
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your-secret-at-least-32-chars"
-
-# Cloudinary
-NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME="your_cloud_name"
-CLOUDINARY_API_KEY="your_api_key"
-CLOUDINARY_API_SECRET="your_api_secret"
-
-# Pusher
-PUSHER_APP_ID="your_app_id"
-PUSHER_KEY="your_key"
-PUSHER_SECRET="your_secret"
+DATABASE_URL="postgresql://..."        # Supabase pooled (pgbouncer)
+DIRECT_URL="postgresql://..."          # Supabase direct (migrations)
+AUTH_SECRET="32-char-secret"
+NEXTAUTH_SECRET="32-char-secret"
+NEXTAUTH_URL="http://localhost:3000"   # local only — omit on Vercel
+CLOUDINARY_CLOUD_NAME=""
+CLOUDINARY_API_KEY=""
+CLOUDINARY_API_SECRET=""
+PUSHER_APP_ID=""
+PUSHER_KEY=""
+PUSHER_SECRET=""
 PUSHER_CLUSTER="ap2"
-NEXT_PUBLIC_PUSHER_KEY="your_key"
+NEXT_PUBLIC_PUSHER_KEY=""
 NEXT_PUBLIC_PUSHER_CLUSTER="ap2"
-
-# Gmail SMTP (App Password, not account password)
-SMTP_HOST="smtp.gmail.com"
-SMTP_PORT="587"
-SMTP_USER="your@gmail.com"
-SMTP_PASS="your_app_password"
-SMTP_FROM="Pixora <your@gmail.com>"
+HUGGINGFACE_API_KEY=""
+EMAIL_USER=""                          # Gmail address
+EMAIL_PASS=""                          # Gmail App Password (not account password)
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+NEXT_PUBLIC_APP_NAME="Pixora"
 ```
 
-### Where to get each service
-
-| Service | Free tier | Link |
-|---|---|---|
-| Supabase | 500 MB database, 2 projects | supabase.com |
-| Cloudinary | 25 GB storage, 25 GB bandwidth/month | cloudinary.com |
-| Pusher Channels | 100 connections, 200k messages/day | pusher.com |
-| Gmail SMTP | Free with Google account | myaccount.google.com → Security → App Passwords |
+| Service | Free Tier |
+|---|---|
+| Supabase | 500 MB DB, 2 projects |
+| Cloudinary | 25 GB storage + bandwidth/month |
+| Pusher Channels | 100 connections, 200k messages/day |
+| Gmail SMTP | Free — myaccount.google.com → Security → App Passwords |
 
 ---
 
 ## Local Setup
 
 ```bash
-git clone <repo-url>
-cd pixora
+git clone https://github.com/Lakshya44444/CIG_OP_WEBD_FINAL
+cd CIG_OP_WEBD_FINAL
 npm install
-cp .env.example .env
+# fill in .env with your values
 npx prisma db push
+npx prisma db seed    # creates 4 demo accounts + 2 sample events
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-### First-time setup
+**Admin without seed:** register → Supabase dashboard or `npx prisma studio` → set `role` to `ADMIN` → log back in.
 
-1. Register an account at `/register`
-2. Check your email for the OTP and verify
-3. In the database (Supabase dashboard or `prisma studio`), set your user's `role` to `ADMIN`
-4. Log back in — you now have full admin access
+### What the seed creates
+
+| Account | Role | Pre-configured membership |
+|---|---|---|
+| admin@snapvault.com | ADMIN | Full access everywhere |
+| photographer@snapvault.com | PHOTOGRAPHER | EventMember of Photography Workshop |
+| member@snapvault.com | VIEWER | EventMember of Photography Workshop |
+| viewer@snapvault.com | VIEWER | No memberships |
+
+Two sample events are created (Photography Workshop, Cultural Fest) plus one album (Day 1 Morning Sessions) so member-only upload behavior is immediately testable after seeding.
 
 ---
 
-## Deployment (Vercel Free Tier)
+## Deployment
 
-### Vercel limits that matter
-
-| Limit | Value | How Pixora handles it |
+| Vercel Limit | Value | How Pixora handles it |
 |---|---|---|
-| Function timeout | 10 seconds | `export const maxDuration = 10` on upload + face-search routes |
-| Function memory | 1024 MB | sharp NCC runs on 24×24px crops — negligible memory |
-| Bandwidth | 100 GB/month | All media served from Cloudinary CDN, not Vercel |
+| Function timeout | 10s | `maxDuration = 10` on upload + face-search; scan capped at 12 photos |
+| Function memory | 1024 MB | NCC on 24×24px crops — ~2 KB per image |
+| Bandwidth | 100 GB/month | All media from Cloudinary CDN, not Vercel |
 
-### Steps
-
-```bash
-npm i -g vercel
-vercel
-```
-
-Set environment variables in the Vercel dashboard under Project → Settings → Environment Variables.
-
-After deploying:
-1. Set `NEXTAUTH_URL` to your production URL (e.g. `https://pixora.vercel.app`)
-2. Add the Vercel domain to Cloudinary's allowed origins
-3. Add the Vercel domain to Pusher's allowed origins
-
-### Performance notes
-
-- **AI tagging is off by default** (`aiTag` toggle defaults to false) — saves ~2s per upload
-- **Face search scans at most 12 recent photos** (`MAX_SCAN = 12`) — keeps within 10s timeout
-- **Thumbnails** are 800px-wide scaled (no crop distortion), served from Cloudinary CDN
-- **Original files** stored at full quality — no compression applied on upload
+1. Push to GitHub → import at [vercel.com/new](https://vercel.com/new)
+2. Add all env vars — **omit `NEXTAUTH_URL`**
+3. Set `NEXT_PUBLIC_APP_URL` to your Vercel URL → Deploy
 
 ---
 
@@ -275,82 +300,70 @@ After deploying:
 ### Auth
 | Method | Route | Description |
 |---|---|---|
-| POST | `/api/auth/register` | Register new user, send OTP |
-| POST | `/api/auth/verify-otp` | Verify OTP, activate account |
-| POST | `/api/auth/[...nextauth]` | NextAuth sign-in/sign-out |
+| POST | `/api/auth/register` | Create account, send OTP |
+| POST | `/api/auth/verify-otp` | Verify 6-digit OTP |
+| POST | `/api/auth/resend-otp` | Resend expired OTP |
+| POST | `/api/auth/forgot-password` | Email JWT reset link |
+| POST | `/api/auth/reset-password` | Apply new password |
 
-### Events
+### Events & Albums
 | Method | Route | Description |
 |---|---|---|
-| GET | `/api/events` | List events (filtered by role) |
-| POST | `/api/events` | Create event (ADMIN/CLUB_ADMIN) |
-| GET | `/api/events/[id]` | Get event details |
-| PATCH | `/api/events/[id]` | Update event |
-| DELETE | `/api/events/[id]` | Delete event |
-| GET | `/api/events/[id]/members` | List EventMembers |
-| POST | `/api/events/[id]/members` | Add EventMember |
-| DELETE | `/api/events/[id]/members/[userId]` | Remove EventMember |
+| GET / POST | `/api/events` | List / create events |
+| GET / PUT / DELETE | `/api/events/[id]` | Get / update / delete event |
+| GET / POST / DELETE | `/api/events/[id]/members` | Manage EventMembers |
 | POST | `/api/events/[id]/admins` | Add EventAdmin |
+| GET / POST | `/api/albums` | List / create albums |
+| GET / PUT / DELETE | `/api/albums/[id]` | Get / update / delete album |
 
 ### Media
 | Method | Route | Description |
 |---|---|---|
-| GET | `/api/media` | List media (role-aware, memberOnly filter) |
-| POST | `/api/media/upload` | Upload photo/video to Cloudinary + DB |
-| GET | `/api/media/[id]` | Get single media item |
-| DELETE | `/api/media/[id]` | Delete media |
-| POST | `/api/media/check-duplicate` | Check if file is duplicate before uploading |
+| GET | `/api/media` | List media (role-aware memberOnly filter) |
+| POST | `/api/media/upload` | Upload to Cloudinary + optional AI tagging |
+| GET / PUT / DELETE | `/api/media/[id]` | Get / update / delete |
+| POST | `/api/media/check-duplicate` | File size check within event |
+| GET | `/api/media/[id]/download` | Watermarked download + audit log |
 | POST | `/api/media/[id]/like` | Toggle like |
 | POST | `/api/media/[id]/favorite` | Toggle favorite |
 | POST | `/api/media/[id]/comment` | Add comment |
-| GET | `/api/media/[id]/download` | Download (tracked, optionally watermarked) |
 
-### AI
+### AI, Social & Search
 | Method | Route | Description |
 |---|---|---|
-| POST | `/api/ai/face-search` | Find photos containing the user's face (NCC pixel comparison via sharp) |
-| POST | `/api/ai/reference-image` | Save a selfie as the user's face reference |
+| POST | `/api/ai/tag` | Generate Cloudinary Vision tags |
+| GET / POST | `/api/ai/face-search` | Get cached results / run NCC face search |
+| POST | `/api/social/follow/[userId]` | Follow / unfollow |
+| POST | `/api/social/tag` | Tag a user in a photo |
+| GET | `/api/search` | Search photos, events, users (text + date range) |
 
-### Users
+### Notifications & Admin
 | Method | Route | Description |
 |---|---|---|
-| GET | `/api/users/[id]` | Get user profile |
-| PATCH | `/api/users/[id]` | Update profile |
-| POST | `/api/users/[id]/follow` | Follow/unfollow |
-
-### Notifications
-| Method | Route | Description |
-|---|---|---|
-| GET | `/api/notifications` | Get unread notifications |
-| PATCH | `/api/notifications/[id]` | Mark as read |
-| PATCH | `/api/notifications/read-all` | Mark all as read |
-
-### Real-time (Pusher)
-| Method | Route | Description |
-|---|---|---|
-| POST | `/api/pusher/auth` | Authenticate private Pusher channels |
+| GET | `/api/notifications` | Get notifications (unread first) |
+| PATCH / POST | `/api/notifications/[id]` · `/read-all` | Mark read |
+| GET / PUT | `/api/admin/users` · `/[id]` | List / update users |
+| POST | `/api/admin/users/[id]/role` | Change user role |
+| POST | `/api/pusher/auth` | Authenticate Pusher channels |
 
 ---
 
-## Architecture
+## Security
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for:
-- **System architecture diagram** — Browser → Next.js API → Prisma → PostgreSQL + Cloudinary/Pusher/SMTP
-- **Entity-relationship diagram** — All 14 tables with relationships
+- Passwords hashed with **bcryptjs** (salt rounds: 10) - plaintext never stored
+- OTP tokens expire after 10 minutes; reset tokens expire after 1 hour
+- All authenticated routes protected by `middleware.ts` - unauthenticated requests redirect to `/login`
+- Admin routes additionally check `token.role === "ADMIN"` in middleware
+- Media visibility enforced server-side on every API route - client-side hiding is cosmetic only
+- Cloudinary uploads use server-side signed requests - API secret never exposed to the browser
+- Pusher private channels authenticated via `/api/pusher/auth` - no unauthenticated subscriptions
+- `NEXTAUTH_URL` intentionally omitted on Vercel; `trustHost: true` in NextAuth config prevents CSRF mismatch on serverless deployments
 
-### Face Search Implementation
+---
 
-Standard embedding-based face recognition requires a GPU inference server (HuggingFace, AWS Rekognition) — incompatible with Vercel's free tier 10s timeout.
+## Built For
 
-Pixora uses a lightweight alternative:
-
-1. When the user uploads a selfie, it is stored as `referenceImageUrl` on their profile via Cloudinary
-2. When face search runs, the Cloudinary Vision API returns face bounding boxes for each photo
-3. Each face crop is downloaded and resized to 24×24 greyscale pixels using `sharp`
-4. A **Normalized Cross-Correlation (NCC)** score is computed between the query selfie and each face crop
-5. Photos where any face scores above threshold (0.25) are returned as matches
-
-NCC is lighting-invariant because it normalizes by mean and variance. It works well for controlled-lighting club event photos. False-positive rate is low because different faces have fundamentally different pixel distributions at this scale.
+This project was built as a submission for the **CIG Web Development Hackathon**. All services used are on free tiers — no paid infrastructure required to run the full platform.
 
 ---
 
