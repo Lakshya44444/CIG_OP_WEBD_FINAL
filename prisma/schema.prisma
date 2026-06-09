@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  CLUB_ADMIN
+  PHOTOGRAPHER
+  MEMBER
+  VIEWER
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  TAG
+  SHARE
+  FOLLOW
+  SYSTEM
+}
+
+enum EventCategory {
+  PHOTOSHOOT
+  WORKSHOP
+  TRIP
+  COMPETITION
+  CULTURAL
+  PARTY
+  SPORTS
+  OTHER
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String
+  username          String    @unique
+  passwordHash      String?
+  avatar            String?
+  bio               String?
+  role              Role      @default(VIEWER)
+  referenceImageUrl String?
+  isActive          Boolean   @default(true)
+  emailVerified     Boolean   @default(false)
+  verificationToken String?   @unique
+  verificationOTP   String?
+  otpExpiresAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  events                Event[]        @relation("EventCreator")
+  media                 Media[]        @relation("MediaUploader")
+  likes                 Like[]
+  comments              Comment[]
+  favorites             Favorite[]
+  tags                  MediaTag[]
+  notificationsReceived Notification[] @relation("NotificationReceiver")
+  notificationsSent     Notification[] @relation("NotificationSender")
+  faceMatches           FaceMatch[]
+  downloads             Download[]
+  albums                Album[]        @relation("AlbumCreator")
+  following             Follow[]       @relation("Follower")
+  followers             Follow[]       @relation("Following")
+  eventAdminOf          EventAdmin[]
+  eventMemberships      EventMember[]
+
+  @@map("users")
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followingId String
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+model Event {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  date        DateTime
+  location    String?
+  category    EventCategory @default(OTHER)
+  coverImage  String?
+  isPublic    Boolean       @default(true)
+  createdById String
+  createdBy   User          @relation("EventCreator", fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  albums      Album[]
+  media       Media[]
+  eventAdmins EventAdmin[]
+  eventMembers EventMember[]
+
+  @@map("events")
+}
+
+model EventAdmin {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@map("event_admins")
+}
+
+model EventMember {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@map("event_members")
+}
+
+model Album {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  coverImage  String?
+  isPublic    Boolean  @default(true)
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User     @relation("AlbumCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  media Media[]
+
+  @@map("albums")
+}
+
+model Media {
+  id           String    @id @default(cuid())
+  url          String
+  thumbnailUrl String?
+  publicId     String
+  type         MediaType @default(IMAGE)
+  width        Int?
+  height       Int?
+  size         Int?
+  title        String?
+  description  String?
+  isPublic     Boolean   @default(true)
+  memberOnly   Boolean   @default(false)
+  eventId      String
+  event        Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  albumId      String?
+  album        Album?    @relation(fields: [albumId], references: [id])
+  uploadedById String
+  uploadedBy   User      @relation("MediaUploader", fields: [uploadedById], references: [id])
+  aiTags       String[]  @default([])
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  likes       Like[]
+  comments    Comment[]
+  favorites   Favorite[]
+  tags        MediaTag[]
+  faceMatches FaceMatch[]
+  downloads   Download[]
+
+  @@index([eventId])
+  @@index([uploadedById])
+  @@index([isPublic, memberOnly])
+  @@index([createdAt(sort: Desc)])
+  @@map("media")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mediaId])
+  @@index([mediaId])
+  @@map("likes")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  text      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mediaId])
+  @@map("comments")
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mediaId])
+  @@index([mediaId])
+  @@map("favorites")
+}
+
+model MediaTag {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mediaId])
+  @@map("media_tags")
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  type       NotificationType
+  message    String
+  isRead     Boolean          @default(false)
+  receiverId String
+  receiver   User             @relation("NotificationReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  senderId   String?
+  sender     User?            @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
+  mediaId    String?
+  link       String?
+  createdAt  DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+model FaceMatch {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId    String
+  media      Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  confidence Float
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, mediaId])
+  @@map("face_matches")
+}
+
+model Download {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId     String
+  media       Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  watermarked Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("downloads")
+}

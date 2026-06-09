@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pixora-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pixora
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pixora_dev_password}
+      POSTGRES_DB: pixora_dev
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=en_US.UTF-8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./prisma/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - pixora-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pixora"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Next.js Application
+  # ─────────────────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pixora-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://pixora:${DB_PASSWORD:-pixora_dev_password}@postgres:5432/pixora_dev
+      DIRECT_URL: postgresql://pixora:${DB_PASSWORD:-pixora_dev_password}@postgres:5432/pixora_dev
+
+      # NextAuth
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-secret-key-change-in-production}
+
+      # Cloudinary (configure with your actual credentials)
+      NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-your_cloud_name}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-your_api_key}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-your_api_secret}
+
+      # Pusher (configure with your actual credentials)
+      NEXT_PUBLIC_PUSHER_APP_ID: ${PUSHER_APP_ID:-your_app_id}
+      NEXT_PUBLIC_PUSHER_KEY: ${PUSHER_KEY:-your_key}
+      NEXT_PUBLIC_PUSHER_CLUSTER: ${PUSHER_CLUSTER:-mt1}
+      PUSHER_SECRET: ${PUSHER_SECRET:-your_secret}
+
+      # Email (Gmail SMTP)
+      EMAIL_USER: ${EMAIL_USER:-your_email@gmail.com}
+      EMAIL_PASS: ${EMAIL_PASS:-your_app_password}
+
+      # Node environment
+      NODE_ENV: development
+
+    ports:
+      - "3000:3000"
+    networks:
+      - pixora-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # pgAdmin - Database Management UI
+  # ─────────────────────────────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pixora-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@pixora.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    networks:
+      - pixora-network
+    depends_on:
+      - postgres
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis (Optional - for future caching/sessions)
+  # ─────────────────────────────────────────────────────────────────────────
+  # Uncomment to enable Redis for caching
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: pixora-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - pixora-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 3
+  #   volumes:
+  #     - redis_data:/data
+
+volumes:
+  postgres_data:
+    driver: local
+  # redis_data:
+  #   driver: local
+
+networks:
+  pixora-network:
+    driver: bridge

@@ -1,0 +1,262 @@
+// Pixora — Event & Media Management Platform
+// Visualize at: https://dbdiagram.io
+
+Table users {
+  id string [primary key, note: "CUID"]
+  email string [unique, not null]
+  name string [not null]
+  username string [unique, not null]
+  passwordHash string [null]
+  avatar string [null]
+  bio string [null]
+  role varchar [default: "VIEWER", note: "ADMIN | CLUB_ADMIN | PHOTOGRAPHER | VIEWER"]
+  referenceImageUrl string [null, note: "Selfie URL stored for facial recognition"]
+  isActive boolean [default: true]
+  emailVerified boolean [default: false]
+  verificationToken string [unique, null]
+  verificationOTP string [null]
+  otpExpiresAt timestamp [null]
+  createdAt timestamp [default: `now()`]
+  updatedAt timestamp
+
+  indexes {
+    email
+    username
+  }
+}
+
+Table follows {
+  id string [primary key, note: "CUID"]
+  followerId string [not null]
+  followingId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (followerId, followingId) [unique]
+    followingId
+  }
+}
+
+Table events {
+  id string [primary key, note: "CUID"]
+  name string [not null]
+  description string [null]
+  date timestamp [not null]
+  location string [null]
+  category varchar [default: "OTHER", note: "PHOTOSHOOT | WORKSHOP | TRIP | COMPETITION | CULTURAL | PARTY | SPORTS | OTHER"]
+  coverImage string [null]
+  isPublic boolean [default: true]
+  createdById string [not null]
+  createdAt timestamp [default: `now()`]
+  updatedAt timestamp
+
+  indexes {
+    createdById
+    date
+    isPublic
+  }
+}
+
+Table event_admins {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  eventId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, eventId) [unique]
+    userId
+    eventId
+  }
+}
+
+Table event_members {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  eventId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, eventId) [unique]
+    userId
+    eventId
+  }
+}
+
+Table albums {
+  id string [primary key, note: "CUID"]
+  name string [not null]
+  description string [null]
+  coverImage string [null]
+  isPublic boolean [default: true]
+  eventId string [not null]
+  createdById string [not null]
+  createdAt timestamp [default: `now()`]
+  updatedAt timestamp
+
+  indexes {
+    eventId
+    createdById
+  }
+}
+
+Table media {
+  id string [primary key, note: "CUID"]
+  url string [not null, note: "Cloudinary CDN URL (original quality)"]
+  thumbnailUrl string [null, note: "800px-wide scaled thumbnail"]
+  publicId string [not null, note: "Cloudinary public_id for transformations"]
+  type varchar [default: "IMAGE", note: "IMAGE | VIDEO"]
+  width integer [null]
+  height integer [null]
+  size integer [null, note: "Bytes"]
+  title string [null]
+  description string [null]
+  isPublic boolean [default: true]
+  memberOnly boolean [default: false, note: "true = uploaded by EventMember; visible to admins + members only. false = uploaded by Photographer/Admin; visible to all."]
+  eventId string [not null]
+  albumId string [null]
+  uploadedById string [not null]
+  aiTags string[] [default: "{}"]
+  createdAt timestamp [default: `now()`]
+  updatedAt timestamp
+
+  indexes {
+    eventId
+    uploadedById
+    (isPublic, memberOnly)
+    createdAt
+  }
+}
+
+Table likes {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  mediaId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, mediaId) [unique]
+    mediaId
+  }
+}
+
+Table comments {
+  id string [primary key, note: "CUID"]
+  text string [not null]
+  userId string [not null]
+  mediaId string [not null]
+  createdAt timestamp [default: `now()`]
+  updatedAt timestamp
+
+  indexes {
+    mediaId
+    userId
+  }
+}
+
+Table favorites {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  mediaId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, mediaId) [unique]
+    mediaId
+  }
+}
+
+Table media_tags {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  mediaId string [not null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, mediaId) [unique]
+    mediaId
+  }
+}
+
+Table notifications {
+  id string [primary key, note: "CUID"]
+  type varchar [not null, note: "LIKE | COMMENT | TAG | SHARE | FOLLOW | SYSTEM"]
+  message string [not null]
+  isRead boolean [default: false]
+  receiverId string [not null]
+  senderId string [null]
+  mediaId string [null]
+  link string [null]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    receiverId
+    isRead
+    createdAt
+  }
+}
+
+Table face_matches {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  mediaId string [not null]
+  confidence float [not null, note: "NCC similarity score 0.0–1.0"]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    (userId, mediaId) [unique]
+    confidence
+  }
+}
+
+Table downloads {
+  id string [primary key, note: "CUID"]
+  userId string [not null]
+  mediaId string [not null]
+  watermarked boolean [default: true]
+  createdAt timestamp [default: `now()`]
+
+  indexes {
+    userId
+    mediaId
+  }
+}
+
+Ref follows_follower: follows.followerId > users.id [delete: cascade]
+Ref follows_following: follows.followingId > users.id [delete: cascade]
+
+Ref events_creator: events.createdById > users.id
+
+Ref event_admins_user: event_admins.userId > users.id [delete: cascade]
+Ref event_admins_event: event_admins.eventId > events.id [delete: cascade]
+
+Ref event_members_user: event_members.userId > users.id [delete: cascade]
+Ref event_members_event: event_members.eventId > events.id [delete: cascade]
+
+Ref albums_event: albums.eventId > events.id [delete: cascade]
+Ref albums_creator: albums.createdById > users.id
+
+Ref media_event: media.eventId > events.id [delete: cascade]
+Ref media_album: media.albumId > albums.id
+Ref media_uploader: media.uploadedById > users.id
+
+Ref likes_user: likes.userId > users.id [delete: cascade]
+Ref likes_media: likes.mediaId > media.id [delete: cascade]
+
+Ref comments_user: comments.userId > users.id [delete: cascade]
+Ref comments_media: comments.mediaId > media.id [delete: cascade]
+
+Ref favorites_user: favorites.userId > users.id [delete: cascade]
+Ref favorites_media: favorites.mediaId > media.id [delete: cascade]
+
+Ref media_tags_user: media_tags.userId > users.id [delete: cascade]
+Ref media_tags_media: media_tags.mediaId > media.id [delete: cascade]
+
+Ref notifications_receiver: notifications.receiverId > users.id [delete: cascade]
+Ref notifications_sender: notifications.senderId > users.id [delete: set null]
+
+Ref face_matches_user: face_matches.userId > users.id [delete: cascade]
+Ref face_matches_media: face_matches.mediaId > media.id [delete: cascade]
+
+Ref downloads_user: downloads.userId > users.id [delete: cascade]
+Ref downloads_media: downloads.mediaId > media.id [delete: cascade]
