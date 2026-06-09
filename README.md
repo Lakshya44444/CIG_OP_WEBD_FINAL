@@ -4,6 +4,8 @@ A full-stack platform for college clubs and organizations to manage event photog
 
 **DEPLOY:** [https://cig-op-webd-final.vercel.app](https://cig-op-webd-final.vercel.app)  
 **ALSO REMEMBER IF YOU OPENING IN MOBILE , OPEN WITH MOBILE NETWORK AS IT BLOCKED BY IIT SERVER**
+
+
 **Database Schema:** [https://dbdiagram.io/d/6a26cbf025fc5bf036b9f762](https://dbdiagram.io/d/6a26cbf025fc5bf036b9f762)
 
 ---
