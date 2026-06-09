@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const protectedRoutes = ["/dashboard", "/events", "/gallery", "/upload", "/profile", "/ai", "/search", "/admin", "/media", "/notifications"];
+const protectedRoutes = ["/dashboard", "/events", "/upload", "/profile", "/ai", "/search", "/admin", "/media", "/notifications"];
 const authRoutes = ["/login", "/register"];
 
-export async function proxy(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+export async function middleware(req: NextRequest) {
+  const token = await getToken({
+    req,
+    secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
+  });
   const { pathname } = req.nextUrl;
 
   const isProtected = protectedRoutes.some((r) => pathname.startsWith(r));
@@ -27,5 +30,7 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  matcher: [
+    "/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+  ],
 };
